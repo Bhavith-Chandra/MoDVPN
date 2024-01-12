@@ -1,11 +1,3 @@
-<div align="center">
-    <a href="https://modvpn.app">
-        <img src="./modvpn-assets/icons/Square71x71Logo.png" >
-    </a>
-    <h3 align="center">modvpn</h3>
-    <h4 align="center">A Modern Serverless VPN</h4>
-    <img src="modvpn-assets/cli.gif" />
-</div>
 
 # modvpn
 
@@ -16,7 +8,7 @@ modvpn desktop app is made up of UI, CLI and background Daemon.
 
 # Serverless
 
-modvpn uses Serverless computing model, where a Linux based WireGuard server is provisioned on public cloud providers when app requests to connect to VPN. And server is deprovisioned when app requests to disconnect from VPN.
+modvpn uses a Serverless computing model, where a Linux-based WireGuard server is provisioned on public cloud providers when app requests to connect to VPN. And server is deprovisioned when app requests to disconnect from VPN.
 
 All of it happens with a single click or tap on the UI, or a single command on terminal.
 
@@ -55,9 +47,5 @@ Please see [modvpn-android/README.md](./modvpn-android/README.md)
 
  Android app, and all Rust crates in this repository are [licensed under GPL version 3](./LICENSE).
 
-Copyright (C) 2023  modvpn LLC
+Copyright (C) 2023  modvpn registered under HydroMind Technologies 2024
 
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
