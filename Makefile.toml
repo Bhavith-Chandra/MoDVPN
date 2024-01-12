@@ -1,0 +1,331 @@
+[env]
+CARGO_MAKE_EXTEND_WORKSPACE_MAKEFILE = true
+PWD = {script = ["pwd"]}
+REPO_ROOT = "${PWD}"
+BUILDER_TAG = {script = ["cat modvpn-packages/tag.txt"] }
+UPSTREAM_REPO = "git@github.com:modvpn/mullvadvpn-app.git"
+UPSTREAM_REV = "2023.3.modvpn"
+UPSTREAM_REPO_PATH = "${PWD}/.modvpn/mullvadvpn-app"
+RUSTUP_HOST = { script = ["rustup show | rg host | awk '{print $3}'"] }
+APP_VERSION = { script = ["grep version modvpn-packages/Cargo.toml | cut -d '\"' -f2"]}
+TARGET = { script = ["echo ${RUSTUP_HOST}"], condition = { env_not_set = ["TARGET"] } }
+STRIP = {script = ["([ ${TARGET} = \"aarch64-unknown-linux-gnu\" ] && echo \"--no-strip\") || echo \"--strip\""]}
+
+
+[tasks.release-build]
+workspace = false
+command = "cargo"
+args = ["build", "--release", "--target", "${TARGET}"]
+
+[tasks.deb]
+workspace = false
+command = "cargo"
+args = ["deb", "-p", "modvpn-packages", "--target", "${TARGET}", "${STRIP}", "${@}"]
+dependencies = ["oss", "ui", "wglib"]
+
+[tasks.rpm]
+workspace = false
+command = "cargo"
+args = ["generate-rpm", "-p", "modvpn-packages", "--target", "${TARGET}", "${@}"]
+dependencies = ["oss", "ui", "wglib", "release-build", "strip"]
+
+[tasks.rpm-no-build]
+workspace = false
+command = "cargo"
+args = ["generate-rpm", "-p", "modvpn-packages", "--target", "${TARGET}", "${@}"]
+dependencies = ["ui", "wglib", "strip"]
+
+[tasks.strip]
+workspace = false
+script = '''
+CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-target}
+
+if [ "${STRIP:-}" = "--strip" ]; then
+    for file in modvpn modvpn-ui modvpn-daemon
+    do
+        output="${CARGO_TARGET_DIR}/${TARGET}/release/${file}"
+        if [ -f "${output}" ]; then
+            strip "${output}"
+        fi
+    done
+fi
+'''
+
+[tasks.pkg]
+workspace = false
+script = '''
+tempdir=$(mktemp -d 2>/dev/null || mktemp -d -t 'mytmpdir')
+cp -R modvpn-packages/macos ${tempdir}
+cp modvpn-assets/icons/icon.icns ${tempdir}/macos/pkg/root/Applications/modvpn.app/Contents/Resources
+cp modvpn-packages/modvpn-oss-licenses.html ${tempdir}/macos/pkg/root/Applications/modvpn.app/Contents/Resources
+cp target/${TARGET}/release/modvpn ${tempdir}/macos/pkg/root/Applications/modvpn.app/Contents/Resources
+cp target/${TARGET}/release/modvpn-daemon ${tempdir}/macos/pkg/root/Applications/modvpn.app/Contents/Resources
+cp target/${TARGET}/release/modvpn-ui ${tempdir}/macos/pkg/root/Applications/modvpn.app/Contents/MacOS
+rm ${tempdir}/macos/pkg/root/Applications/modvpn.app/Contents/MacOS/.gitkeep
+pushd ${tempdir}/macos
+./build.sh "${APP_VERSION}"
+popd
+mkdir -p target/pkg
+AARCH=$(uname -m)
+cp ${tempdir}/macos/modvpn-${APP_VERSION}.pkg target/pkg/modvpn-${APP_VERSION}-${AARCH}.pkg
+echo "Output: target/pkg/modvpn-${APP_VERSION}-${AARCH}.pkg"
+rm -r ${tempdir}
+'''
+dependencies = ["oss", "ui", "wglib", "release-build"]
+
+[tasks.setupupstream]
+workspace = false
+script_runner = "sh"
+script = '''
+#!/usr/bin/env bash
+mkdir -p ${UPSTREAM_REPO_PATH}
+
+if [ ! -d ${UPSTREAM_REPO_PATH}/.git ]; then
+    git clone ${UPSTREAM_REPO} ${UPSTREAM_REPO_PATH}
+    cd ${UPSTREAM_REPO_PATH} && git submodule update --init && cd -
+fi
+
+cd ${UPSTREAM_REPO_PATH}
+git fetch --all --tags
+git checkout ${UPSTREAM_REV}
+'''
+
+[tasks.wglib]
+workspace = false
+script_runner = "sh"
+script = '''
+#!/usr/bin/env bash
+cd ${UPSTREAM_REPO_PATH}
+./wireguard/build-wireguard-go.sh "${TARGET}"
+cp -r ${UPSTREAM_REPO_PATH}/build ${REPO_ROOT}
+'''
+dependencies = ["cargo-config", "setupupstream"]
+
+[tasks.winfw]
+workspace = false
+script_runner = "sh"
+script = '''
+#!/usr/bin/env bash
+output_dir=${REPO_ROOT}/windows/${TARGET}
+mkdir -p ${output_dir}
+cd ${UPSTREAM_REPO_PATH}
+IS_RELEASE=true CPP_BUILD_MODES=Release ./build-windows-modules.sh
+cp -r ${UPSTREAM_REPO_PATH}/windows/winfw/bin/x64-Release/ ${output_dir}
+'''
+
+[tasks.windows]
+workspace = false
+dependencies = ["oss", "cargo-config", "setupupstream", "wglib", "ui", "winfw", "release-build"]
+
+[tasks.windows-sign]
+workspace = false
+script_runner = "sh"
+script = '''
+#!/usr/bin/env bash
+set -eu
+./modvpn-packages/windows/sign.sh \
+    target/${TARGET}/release/modvpn.exe \
+    target/${TARGET}/release/modvpn-ui.exe \
+    target/${TARGET}/release/modvpn-daemon.exe \
+    build/lib/${TARGET}/libwg.dll \
+    windows/${TARGET}/X64-Release/winfw.dll
+'''
+
+[tasks.only-msi]
+workspace = false
+script_runner = "sh"
+script = '''
+#!/usr/bin/env bash
+cd modvpn-packages/windows
+candle -ext WixUtilExtension -dAppVersion=${APP_VERSION} -out modvpn.wixobj -arch x64 modvpn.wsx
+light -ext WixUtilExtension -dAppVersion=${APP_VERSION} -out modvpn-x64-${APP_VERSION}.msi modvpn.wixobj
+'''
+
+[tasks.sign-msi]
+workspace = false
+script_runner = "sh"
+script = '''
+#!/usr/bin/env bash
+set -eu
+./modvpn-packages/windows/sign.sh modvpn-packages/windows/modvpn-x64-${APP_VERSION}.msi
+'''
+
+[tasks.msi]
+workspace = false
+dependencies = ["windows", "windows-sign", "only-msi", "sign-msi"]
+
+[tasks.cargo-config]
+workspace = false
+script_runner = "sh"
+script = '''
+#!/usr/bin/env bash
+root_dir=$(pwd)
+mkdir -p ${root_dir}/.cargo
+cp ${root_dir}/modvpn-packages/cargo-config.toml ${root_dir}/.cargo/config
+sd __REPO_ROOT__ "${root_dir}" ${root_dir}/.cargo/config
+'''
+
+[tasks.ui]
+workspace = false
+script_runner = "sh"
+script = '''
+#!/usr/bin/env bash
+cd modvpn-ui
+npm install
+npm run build
+'''
+
+[tasks.volumes-for-build]
+workspace = false
+script = '''
+docker volume rm modvpn-app-builder || true
+docker volume create modvpn-app-builder-cargo-git
+docker volume create modvpn-app-builder-cargo-registry
+docker volume create modvpn-app-builder-cargo-target
+docker volume create modvpn-app-builder-go
+docker volume create modvpn-app-builder
+'''
+
+[tasks.clear-and-copy-source]
+workspace = false
+script = '''
+
+docker run --rm -v ${PWD}:/source \
+    -v modvpn-app-builder:/build \
+    ghcr.io/modvpn/modvpn-app-builder:${BUILDER_TAG} \
+        cp -r \
+        /source/modvpn-assets \
+        /source/modvpn-cli \
+        /source/modvpn-config \
+        /source/modvpn-controller \
+        /source/modvpn-daemon \
+        /source/modvpn-entity \
+        /source/modvpn-migration \
+        /source/modvpn-packages \
+        /source/modvpn-server \
+        /source/modvpn-types \
+        /source/modvpn-ui \
+        /source/Cargo.toml \
+        /source/Cargo.lock \
+        /source/about.toml \
+        /source/Makefile.toml \
+        /source/.dockerignore \
+        /build/
+
+docker run --rm  \
+    -v modvpn-app-builder:/build \
+    ghcr.io/modvpn/modvpn-app-builder:${BUILDER_TAG} chown -R root:root .
+'''
+
+[tasks.builder-shell]
+workspace = false
+command = "docker"
+args = [
+    "run",
+    "--rm",
+    "-it",
+    "-v", "modvpn-app-builder-cargo-git:/root/.cargo/git",
+    "-v", "modvpn-app-builder-cargo-registry:/root/.cargo/registry",
+    "-v", "modvpn-app-builder-cargo-target:/root/.cargo/target",
+    "-v", "modvpn-app-builder-go:/root/go",
+    "-v", "modvpn-app-builder:/build",
+    # To clone github repo using ssh
+    "-v", "${HOME}/.ssh:/root/.ssh",
+    "-e", "CARGO_NET_GIT_FETCH_WITH_CLI=true",
+    "-e", "TARGET=${TARGET}",
+    # tag created by builder task
+    "ghcr.io/modvpn/modvpn-app-builder:${BUILDER_TAG}",
+    "bash"
+]
+dependencies = ["volumes-for-build", "clear-and-copy-source"]
+
+[tasks.linux-packages]
+workspace = false
+# only need to build once for packaging both
+dependencies = ["deb", "rpm-no-build"]
+
+[tasks.build-in-container]
+workspace = false
+command = "docker"
+args = [
+    "run",
+    "--rm",
+    "-it",
+    "-v", "modvpn-app-builder-cargo-git:/root/.cargo/git",
+    "-v", "modvpn-app-builder-cargo-registry:/root/.cargo/registry",
+    "-v", "modvpn-app-builder-cargo-target:/root/.cargo/target",
+    "-v", "modvpn-app-builder-go:/root/go",
+    "-v", "modvpn-app-builder:/build",
+    # To clone github repo using ssh
+    "-v", "${HOME}/.ssh:/root/.ssh",
+    "-e", "CARGO_NET_GIT_FETCH_WITH_CLI=true",
+    "-e", "TARGET=${TARGET}",
+    # tag created by builder task
+    "ghcr.io/modvpn/modvpn-app-builder:${BUILDER_TAG}",
+    "cargo",
+    "make",
+    "-e", "TARGET=${TARGET}",
+    "linux-packages",
+]
+dependencies = ["volumes-for-build", "clear-and-copy-source"]
+
+[tasks.output-dir]
+workspace = false
+script = '''
+echo "TARGET: ${TARGET}"
+mkdir -p ${PWD}/dist/${TARGET}
+'''
+
+[tasks.linux]
+workspace = false
+command = "docker"
+args = [
+    "run",
+    "--rm",
+    "-it",
+    "-v", "modvpn-app-builder-cargo-target:/root/.cargo/target",
+    "-v", "${PWD}/dist:/dist",
+    # tag created by builder task
+    "ghcr.io/modvpn/modvpn-app-builder:${BUILDER_TAG}",
+    "cp", "-r",
+    "/root/.cargo/target/${TARGET}/debian", "/root/.cargo/target/${TARGET}/generate-rpm",
+    "/dist/${TARGET}",
+]
+dependencies = ["output-dir", "build-in-container"]
+
+[tasks.icon]
+workspace = false
+script = '''
+cd modvpn-ui
+cargo tauri icon -o ../modvpn-assets/icons  ../modvpn-assets/app-icon.png
+'''
+
+[tasks.oss]
+workspace = false
+script_runner = "sh"
+script = '''
+#!/usr/bin/env bash
+set -eu
+cargo about generate modvpn-packages/modvpn-oss-licenses-rust.hbs > modvpn-packages/modvpn-oss-licenses-rust.html
+sd "(talpid-[\w-]+|tunnel-obfuscation) (\d+.\d+.\d+)" '$1 $2   Copyright (C) Mullvad VPN AB, GPL-3.0' modvpn-packages/modvpn-oss-licenses-rust.html
+sd "https://crates.io/crates//(talpid-\w+|tunnel-obfuscation)" 'https://github.com/mullvad/mullvadvpn-app/tree/main/$1' modvpn-packages/modvpn-oss-licenses-rust.html
+
+cd modvpn-ui && npm i && cd ..
+npx --yes generate-license-file --overwrite --ci --input modvpn-ui/package.json --output modvpn-packages/third-party-licenses.txt
+
+cat modvpn-packages/modvpn-oss-licenses-header.hbs > modvpn-packages/modvpn-oss-licenses.html
+cat modvpn-packages/modvpn-oss-licenses-rust.html >> modvpn-packages/modvpn-oss-licenses.html
+cat modvpn-packages/third-party-licenses.txt >> modvpn-packages/modvpn-oss-licenses.html
+cat modvpn-packages/modvpn-oss-licenses-footer.hbs >> modvpn-packages/modvpn-oss-licenses.html
+'''
+
+
+
+[tasks.android-init]
+workspace = false
+script = '''
+git clone git@github.com:WireGuard/wireguard-tools.git modvpn-android/app/tunnel/wireguard-tools
+cd modvpn-android/app/tunnel/wireguard-tools && git checkout b4f6b4f229d291daf7c35c6f1e7f4841cc6d69bc && cd -
+git clone git@github.com:termux/termux-elf-cleaner.git modvpn-android/app/tunnel/elf-cleaner
+cd modvpn-android/app/tunnel/elf-cleaner && git checkout 7efc05090675ec6161b7def862728086a26c3b1f && cd -
+'''

@@ -1,0 +1,8 @@
+# Development configuration
+
+socket_path="../../data/modvpn.sock"
+grpc_api_host_port="grpc://modvpn.dev:44444"
+rest_api_host_port="https://modvpn.dev:4444"
+log_dir="../../data/log"
+config_dir="../../data"
+license_file_path="../../modvpn-oss-licenses.html"

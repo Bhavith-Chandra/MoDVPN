@@ -1,0 +1,143 @@
+[package]
+name = "modvpn-packages"
+version = "0.5.0" # actual version
+edition = "2021"
+publish = false
+license = "GPL-3.0"
+authors = ["modvpn LLC"]
+description = "A Modern Serverless VPN"
+homepage = "https://modvpn.app"
+repository = "https://github.com/modvpn/modvpn-app"
+
+
+#
+# DEBIAN PACKAGING
+#
+[package.metadata.deb]
+name = "modvpn"
+# Maintainer is first author in authors
+# maintainer = ""
+assets = [
+    ["target/release/modvpn", "usr/bin/", "755"],
+    ["target/release/modvpn-ui", "/opt/modvpn/modvpn", "755"],
+    ["target/release/modvpn-daemon", "/opt/modvpn/modvpn-daemon", "755"],
+    ["linux/modvpn.desktop", "usr/share/applications/", "644"],
+    ["modvpn-oss-licenses.html", "/opt/modvpn/modvpn-oss-licenses.html", "644"],
+    ["../modvpn-assets/icons/32x32.png", "usr/share/icons/hicolor/32x32/apps/modvpn.png", "644"],
+    ["../modvpn-assets/icons/128x128.png", "usr/share/icons/hicolor/128x128/apps/modvpn.png", "644"],
+    ["../modvpn-assets/icons/128x128@2x.png", "usr/share/icons/hicolor/256x256/apps/modvpn.png", "644"],
+    ["../modvpn-assets/icons/icon.png", "usr/share/icons/hicolor/512x512/apps/modvpn.png", "644"],
+]
+depends = "libwebkit2gtk-4.0-37 (>= 2.21.1), libgtk-3-0 (>= 3.21.4), libayatana-appindicator3-1"
+maintainer-scripts = "linux/debian/maintainer-scripts/"
+systemd-units = { unit-name = "modvpn-daemon", enable = true, start= true, restart-after-upgrade = false, stop-on-upgrade = true, unit-scripts = "linux/unit-scripts"}
+
+[package.metadata.deb.variants.staging]
+name = "modvpn-staging"
+assets = [
+    ["target/release/modvpn", "usr/bin/", "755"],
+    ["target/release/modvpn-ui", "/opt/modvpn/modvpn", "755"],
+    ["target/release/modvpn-daemon", "/opt/modvpn/modvpn-daemon", "755"],
+    ["linux/modvpn.desktop", "usr/share/applications/", "644"],
+    ["modvpn-oss-licenses.html", "/opt/modvpn/modvpn-oss-licenses.html", "644"],
+    ["../modvpn-assets/icons/32x32.png", "usr/share/icons/hicolor/32x32/apps/modvpn.png", "644"],
+    ["../modvpn-assets/icons/128x128.png", "usr/share/icons/hicolor/128x128/apps/modvpn.png", "644"],
+    ["../modvpn-assets/icons/128x128@2x.png", "usr/share/icons/hicolor/256x256/apps/modvpn.png", "644"],
+    ["../modvpn-assets/icons/icon.png", "usr/share/icons/hicolor/512x512/apps/modvpn.png", "644"],
+    ["linux/staging-config/modvpn.conf.toml", "etc/modvpn/", "644"]
+]
+
+#
+# RPM PACKAGING
+#
+[package.metadata.generate-rpm.requires]
+"webkit2gtk4.0" = ">= 2.38.5"
+"libappindicator-gtk3" = ">= 12.10.1"
+
+[package.metadata.generate-rpm]
+name = "modvpn"
+assets = [
+    { source = "target/release/modvpn", dest = "/usr/bin/modvpn", mode = "755" },
+    { source = "target/release/modvpn-ui", dest = "/opt/modvpn/modvpn", mode = "755" },
+    { source = "target/release/modvpn-daemon", dest = "/opt/modvpn/modvpn-daemon", mode = "755" },
+    { source = "linux/modvpn.desktop", dest = "/usr/share/applications/modvpn.desktop", mode = "644"},
+    { source = "modvpn-oss-licenses.html", dest = "/opt/modvpn/modvpn-oss-licenses.html", mode =  "644"},
+    { source = "linux/unit-scripts/modvpn-daemon.service", dest = "/usr/lib/systemd/system/modvpn-daemon.service", mode = "644"},
+    { source = "../modvpn-assets/icons/32x32.png", dest = "/usr/share/icons/hicolor/32x32/apps/modvpn.png", mode = "644" },
+    { source = "../modvpn-assets/icons/128x128.png", dest = "/usr/share/icons/hicolor/128x128/apps/modvpn.png", mode = "644" },
+    {source = "../modvpn-assets/icons/128x128@2x.png", dest = "/usr/share/icons/hicolor/256x256/apps/modvpn.png", mode = "644"},
+    {source = "../modvpn-assets/icons/icon.png", dest = "/usr/share/icons/hicolor/512x512/apps/modvpn.png", mode = "644"},
+]
+auto-req = "no"
+
+# presinst
+pre_install_script = '''
+set -euo pipefail
+
+# Stop daemon and UI
+
+if which systemctl &> /dev/null; then
+    if systemctl status modvpn-daemon &> /dev/null; then
+        systemctl stop modvpn-daemon.service
+        systemctl disable modvpn-daemon.service
+        cp /var/log/modvpn/modvpn-daemon.log /var/log/modvpn/previous-modvpn-daemon.log \
+            || echo "Failed to copy previous daemon log file"
+    fi
+fi
+
+pkill -x "modvpn" || true
+'''
+
+# postinst
+post_install_script = '''
+set -e
+systemctl enable "/usr/lib/systemd/system/modvpn-daemon.service"
+systemctl start modvpn-daemon.service
+'''
+
+pre_uninstall_script = '''
+set -euo pipefail
+
+# Stop UI
+pkill -x "modvpn" || true
+
+is_number_re='^[0-9]+$'
+# Check if we're running during an upgrade step on Fedora
+# https://fedoraproject.org/wiki/Packaging:Scriptlets#Syntax
+if [[ "$1" =~ $is_number_re ]] && [ $1 -gt 0 ]; then
+    exit 0;
+fi
+
+if [[ "$1" == "upgrade" ]]; then
+    exit 0;
+fi
+
+systemctl stop modvpn-daemon.service || true
+systemctl disable modvpn-daemon.service || true
+'''
+
+post_uninstall_script = '''
+set -euo pipefail
+
+# remove log and configuration files
+remove_log_and_configuration() {
+    # all log files
+    if [ -d /var/log/modvpn ]; then
+        rm -r --interactive=never /var/log/modvpn/ || \
+        echo "Failed to remove modvpn log files"
+    fi
+
+    # config files if any
+    if [ -d /etc/modvpn ]; then
+        rm -r --interactive=never /etc/modvpn/ || \
+        echo "Failed to remove modvpn configuration files"
+    fi
+}
+
+case "$@" in
+    # apt purge; yum remove
+    "0")
+        remove_log_and_configuration
+        ;;
+esac
+'''

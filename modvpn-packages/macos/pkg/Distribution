@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<installer-gui-script minSpecVersion="2">
+    <title>modvpn</title>
+    <welcome file="welcome.html" mime-type="text/html"/>
+    <conclusion file="conclusion.html" mime-type="text/html"/>
+    <options customize="never" require-scripts="false" />
+    <pkg-ref id="app.modvpn.macos">
+        <bundle-version>
+            <bundle CFBundleShortVersionString="APP_VERSION" CFBundleVersion="APP_VERSION" id="app.modvpn.macos" path="modvpn.app"/>
+        </bundle-version>
+    </pkg-ref>
+    <product id="app.modvpn.macos" version="APP_VERSION"/>
+    <volume-check>
+        <allowed-os-versions>
+            <os-version min="10.11.0"/>
+        </allowed-os-versions>
+    </volume-check>
+    <choices-outline>
+        <line choice="default">
+            <line choice="app.modvpn.macos"/>
+        </line>
+    </choices-outline>
+    <choice id="default" title="modvpn" versStr="APP_VERSION"/>
+    <choice id="app.modvpn.macos" title="modvpn" visible="false">
+        <pkg-ref id="app.modvpn.macos"/>
+    </choice>
+    <pkg-ref id="app.modvpn.macos" version="APP_VERSION" onConclusion="none" >#app.modvpn.macos.pkg</pkg-ref>
+    <domains enable_anywhere="false" enable_currentUserHome="false" enable_localSystem="true"/>
+</installer-gui-script>

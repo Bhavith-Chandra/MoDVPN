@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+# Stop daemon and UI
+
+if which systemctl &> /dev/null; then
+    if systemctl status modvpn-daemon &> /dev/null; then
+        systemctl stop modvpn-daemon.service
+        systemctl disable modvpn-daemon.service
+        cp /var/log/modvpn/modvpn-daemon.log /var/log/modvpn/previous-modvpn-daemon.log \
+            || echo "Failed to copy previous daemon log file"
+    fi
+fi
+
+pkill -x "modvpn" || true
+
+#DEBHELPER#

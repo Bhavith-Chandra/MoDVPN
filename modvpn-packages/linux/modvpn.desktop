@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=modvpn
+Comment=A Modern Serverless VPN
+Exec=/opt/modvpn/modvpn
+Terminal=false
+Type=Application
+Categories=Network;Security;
+Icon=modvpn
+SingleMainWindow=true
